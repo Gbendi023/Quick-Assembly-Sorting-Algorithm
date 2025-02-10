@@ -1,0 +1,136 @@
+;
+; lab2.asm
+; Description: This AVR assembly program for the ATxmega128A1U reads a table
+; of 8-bit values from program memory, processes each entry based on specific
+; conditions, and stores the filtered results in data memory. When viewed in
+; ASCII, the output forms the message "EElabworld."
+;
+; Created: 2/7/2025 12:42:27 PM
+; Author : Gabeb
+;
+
+;************************************************************************
+;*********************************INCLUDES*******************************
+; Include the device-specific definitions for registers, bit names, etc.
+.include "ATxmega128a1udef.inc"
+;***********END OF INCLUDES******************************
+
+;*********************************EQUATES********************************
+; Define useful constants and expressions
+
+.equ NULL = 0                     ; Define NULL (0) as the end-of-table marker
+
+; Calculate a constant used for subtraction (3*7 + 37/3 - (3-7) evaluates to 21+12+4 = 37)
+.equ ThirtySeven = 3*7 + 37/3 - (3-7)
+
+; Convert the program memory address 0xCAFE to a word address (shift right by 1)
+.equ IN_TABLE_PTR = (0xCAFE >> 1) ; Helps adjust addressing for word-based program memory
+
+;***********END OF EQUATES*******************************
+
+;***********MEMORY CONFIGURATION*************************
+; Program Memory Setup
+.cseg
+.org 0x657F                     ; Set program memory starting location (adjusted from 0xCAFE)
+IN_TABLE:
+    .db 27, 0b00110101, 'æ', 0xD6, 194, 0b11100100, 'J', 0116, 'Ú', 0b11110111, 0x47, 037, 'C', 35, NULL
+    .db NULL                   ; End-of-table marker (NULL) to signal termination of input data
+; Label used to calculate the size of the input table
+IN_TABLE_END:
+
+; Data Memory Setup
+.dseg
+.org 0x311A                    ; Set starting address in data memory for the output table
+OUT_TABLE:
+    .byte (IN_TABLE_END - IN_TABLE) ; Allocate space equal to the input table size
+;***********END OF MEMORY CONFIGURATION***************
+
+;***********MAIN PROGRAM*******************************
+.cseg
+; Reset Vector Configuration
+.org 0x0
+    rjmp MAIN                 ; On reset, jump to the MAIN program
+
+; Place the main program after the interrupt vectors
+.org 0x100
+MAIN:
+    ; Initialize pointer registers for the input (Z pointer) and output (Y pointer) tables
+	ldi r30, low(IN_TABLE_PTR)   ; Load low byte of input table pointer into r30 (Z pointer low)
+    ldi r31, high(IN_TABLE_PTR)  ; Load high byte of input table pointer into r31 (Z pointer high)
+
+    ldi r28, low(OUT_TABLE)      ; Load low byte of output table pointer into r28 (Y pointer low)
+    ldi r29, high(OUT_TABLE)     ; Load high byte of output table pointer into r29 (Y pointer high)
+
+;-------------------------------
+; Main Loop: Process Input Table
+;-------------------------------
+LOOP:
+    ; Load the next byte from program memory (pointed by Z) into r16 and post-increment Z
+    lpm r16, Z+
+    
+    ; Compare the loaded byte with NULL to determine if the end-of-table is reached
+    cpi r16, NULL
+    breq DONE                   ; If equal to NULL, branch to DONE and exit the loop
+
+    ; Copy r16 into r17 and check the most-significant bit (bit 7)
+    mov r17, r16
+    andi r17, 0x80             ; Mask all bits except bit 7
+    breq CHECK_1               ; If bit 7 is clear, go to first conditional check
+    rjmp FAILED_CHECK1         ; If bit 7 is set, branch to second conditional check
+
+;-------------------------------
+; Condition 1: Bit 7 is NOT set (value is < 128)
+;-------------------------------
+CHECK_1:
+    ; Multiply the value by 2 using a logical shift left (LSL)
+    lsl r16                    ; r16 = r16 * 2
+
+    ; Check if the doubled value is greater than or equal to 70
+    cpi r16, 70
+    brsh GREATER_EQUAL_70      ; If result >= 70, branch to adjust the value
+    rjmp LOOP                  ; Otherwise, ignore the value and continue with the next entry
+
+;-------------------------------
+; GREATER_EQUAL_70: Adjust value when condition 1 result >= 70
+;-------------------------------
+GREATER_EQUAL_70:
+    ; Subtract the precomputed constant (ThirtySeven) from r16
+    subi r16, ThirtySeven
+
+    ; Store the adjusted value into the output table and post-increment the Y pointer
+    st Y+, r16
+
+    ; Continue processing the next value
+    rjmp LOOP
+
+;-------------------------------
+; FAILED_CHECK1: Condition 2 - Bit 7 is set (value >= 128)
+;-------------------------------
+FAILED_CHECK1:
+    ; Divide the value by 2 using a logical shift right (LSR)
+    lsr r16                    ; r16 = r16 / 2
+
+    ; Check if the halved value is less than 110
+    cpi r16, 110
+    brlo LESS_THAN_110         ; If less than 110, branch to further adjust the value
+    rjmp LOOP                  ; Otherwise, skip storing and continue with the next entry
+
+;-------------------------------
+; LESS_THAN_110: Adjust value when Condition 2 result < 110
+;-------------------------------
+LESS_THAN_110:
+    ; Increment the value by 1
+    inc r16
+
+    ; Store the adjusted value into the output table and post-increment the Y pointer
+    st Y+, r16
+
+    ; Continue with the next value in the loop
+    rjmp LOOP
+
+;-------------------------------
+; DONE: End of Program
+;-------------------------------
+DONE: 
+    rjmp DONE                 ; Infinite loop to halt execution (end of program)
+;***********END OF MAIN PROGRAM ***********************
